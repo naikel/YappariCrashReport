@@ -99,7 +99,7 @@ namespace YappariCrashReport
                QString(),
       };
 
-      const QString cFileName = QStringLiteral( "%2 %3 Crash.log" ).arg( QDateTime::currentDateTime().toString( "yyyyMMdd-HHmmss" ),
+      const QString cFileName = QStringLiteral( "%1 %2 Crash.log" ).arg( QDateTime::currentDateTime().toString( "yyyyMMdd-HHmmss" ),
                                                                          QCoreApplication::applicationName() );
 
 
