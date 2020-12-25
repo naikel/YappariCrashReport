@@ -1,10 +1,12 @@
 #include <QApplication>
 #include <QMessageBox>
+#include <QIcon>
+#include <QDebug>
 
 #include <cassert>
 
-#ifdef ASM_CRASH_REPORT
-#include "asmCrashReport.h"
+#ifdef YAPPARI_CRASH_REPORT
+#include "YappariCrashReport.h"
 #endif
 
 class crashTest
@@ -38,25 +40,20 @@ int main( int argc, char** argv )
 {
    QApplication  app( argc, argv );
 
-   app.setApplicationName( QStringLiteral( "asmCrashReportExample" ) );
+   app.setApplicationName( QStringLiteral( "YappariCrashReportExample" ) );
    app.setApplicationVersion( QStringLiteral( "1.0.0" ) );
+   app.setWindowIcon(QIcon(QPixmap(":icons/bomb.png")));
 
-#ifdef ASM_CRASH_REPORT
-   asmCrashReport::setSignalHandler( QString(), [] (const QString &inFileName, bool inSuccess) {
-      QString  message;
 
-      if ( inSuccess )
-      {
-         message = QStringLiteral( "Sorry, %1 has crashed. A log file was written to:\n\n%2\n\nPlease email this to support@example.com." ).arg( QCoreApplication::applicationName(), inFileName );
-      }
-      else
-      {
-         message = QStringLiteral( "Sorry, %1 has crashed and we could not write a log file to:\n\n%2\n\nPlease contact support@example.com." ).arg( QCoreApplication::applicationName(), inFileName );
-      }
+#ifdef YAPPARI_CRASH_REPORT
+   YappariCrashReport::setSignalHandler( [] (const QString &inStackTrace) {
 
-      QMessageBox::critical( nullptr, QObject::tr( "%1 Crashed" ).arg( QCoreApplication::applicationName() ), message );
+       const QStringList strList = QStringList(inStackTrace.split("\n"));
+       for (const QString &str : strList)
+           qCritical() << str;
    });
 #endif
+
 
    crashTest().crashMe();
 

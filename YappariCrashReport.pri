@@ -1,18 +1,28 @@
 
 CONFIG (release, release|debug) {
-    !build_pass:message( 'Enabling asmCrashReport and including debug symbols' )
+    !build_pass:message( 'Enabling YappariCrashReport and including debug symbols' )
 
-    DEFINES += ASM_CRASH_REPORT
+    QT += widgets
 
-    VPATH += $$PWD/src
+    DEFINES += YAPPARI_CRASH_REPORT
+
+VPATH += $$PWD/src
     DEPENDPATH += $$PWD/src
     INCLUDEPATH += $$PWD/src
 
     HEADERS += \
-        $$PWD/src/asmCrashReport.h
+    $$PWD/src/YappariCrashReport.h
 
     SOURCES += \
-        $$PWD/src/asmCrashReport.cpp
+    $$PWD/src/YappariCrashReport.cpp
+
+    FORMS += \
+        $$PWD/src/crashreportdialog.ui
+
+
+    RESOURCES += \
+        $$PWD/src/resources.qrc
+
 
     win32-g++* {
         QMAKE_CFLAGS_RELEASE -= -O2
@@ -22,7 +32,7 @@ CONFIG (release, release|debug) {
         QMAKE_CXXFLAGS_RELEASE += -g -O0
         QMAKE_LFLAGS_RELEASE =
 
-        LIBS += "-L$$PWD/Win/WinDebug" -lDbghelp
+        LIBS += -lDbghelp
     }
 
     mac {
@@ -38,8 +48,22 @@ CONFIG (release, release|debug) {
 
         QMAKE_LFLAGS_RELEASE += -Wl,-no_pie
     }
+
+    linux {
+        QMAKE_CFLAGS_RELEASE -= -O2
+        QMAKE_CXXFLAGS_RELEASE -= -O2
+
+        QMAKE_CFLAGS_RELEASE += -g -O0
+        QMAKE_CXXFLAGS_RELEASE += -g -O0
+    }
 }
 
 CONFIG (debug, release|debug) {
-    message( 'NOTE: asmCrashReport is only valid for release builds' )
+    message( 'NOTE: YappariCrashReport is only valid for release builds' )
 }
+
+SOURCES += \
+    $$PWD/src/CrashReportDialog.cpp
+
+HEADERS += \
+    $$PWD/src/CrashReportDialog.h

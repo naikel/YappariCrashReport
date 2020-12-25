@@ -27,10 +27,10 @@
 #include <QStandardPaths>
 #include <QStringList>
 #include <QTextStream>
+#include <QDebug>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
-#include <cxxabi.h>
 #include <imagehlp.h>
 #else
 #include <csignal>
@@ -38,22 +38,29 @@
 #include <execinfo.h>
 #endif
 
-#include "asmCrashReport.h"
+#include "YappariCrashReport.h"
+#include "CrashReportDialog.h"
 
 
-namespace asmCrashReport
+namespace YappariCrashReport
 {
    static QString sProgramName;        // the full path to the executable (which we need to resolve symbols)
-   static QString sCrashReportDirPath; // where to store the crash reports
 
    // Note that we are looking for GCC-style name mangles
    // See: https://en.wikipedia.org/wiki/Name_mangling#How_different_compilers_mangle_the_same_functions
+#ifdef Q_OS_LINUX
+   // Example:
+   // /usr/lib/libc.so.6(__libc_start_main+0xf2) [0x7f10f2819152]
+   static QRegularExpression  sSymbolMatching("^(.*)\\(.*\\+0x([^ ]+)\\).*\\[([^ ]+)\\]$");
+#else
    static QRegularExpression  sSymbolMatching("^.*(_Z[^ ]+).*$");
+#endif
 
-   static logWrittenCallback  sLogWrittenCallback; // function to call after we've written the log file
+
+   static crashReportCallback  sCrashReportCallback; // function to call after we've shown the crash report to the user
    static QProcess            *sProcess = nullptr; // process used to capture output of address mapping tool
 
-   void  _writeLog( const QString &inSignal, const QStringList &inFrameInfoList )
+   void  _showCrashReportDialog( const QString &inSignal, const QStringList &inFrameInfoList )
    {
       const QStringList cReportHeader{
          QStringLiteral( "%1 v%2" ).arg( QCoreApplication::applicationName(), QCoreApplication::applicationVersion() ),
@@ -63,33 +70,17 @@ namespace asmCrashReport
                QString(),
       };
 
-      QDir().mkpath( sCrashReportDirPath );
+      const QString cFileName = QStringLiteral( "%2 %3 Crash.log" ).arg( QDateTime::currentDateTime().toString( "yyyyMMdd-HHmmss" ),
+                                                                         QCoreApplication::applicationName() );
 
-      const QString  cFileName = QStringLiteral( "%1/%2 %3 Crash.log" ).arg( sCrashReportDirPath,
-                                                                             QDateTime::currentDateTime().toString( "yyyyMMdd-HHmmss" ),
-                                                                             QCoreApplication::applicationName() );
 
-      QFile file( cFileName );
-      bool  fileWritten = false;
+      // Show the crash report dialog
+      const QString cStackTrace = QStringList(cReportHeader + inFrameInfoList).join("\n");
+      CrashReportDialog dialog( cFileName, cStackTrace );
+      dialog.exec();
 
-      if ( file.open( QIODevice::WriteOnly | QIODevice::Text ) )
-      {
-         QTextStream stream( &file );
-
-         for ( const QString &data : cReportHeader + inFrameInfoList )
-         {
-            stream << data << endl;
-         }
-
-         fileWritten = true;
-
-         file.close();
-      }
-
-      if ( sLogWrittenCallback != nullptr )
-      {
-         (*sLogWrittenCallback)( cFileName, fileWritten );
-      }
+      if ( sCrashReportCallback != nullptr )
+         (*sCrashReportCallback)( cStackTrace );
    }
 
    // Resolve symbol name & source location
@@ -106,21 +97,27 @@ namespace asmCrashReport
          "-arch", "x86_64",
          cAddrStr
       };
-#else
+#elsif Q_OS_WIN
       // Uses addr2line
       const QString  cProgram = QStringLiteral( "%1/tools/addr2line" ).arg( QCoreApplication::applicationDirPath() );
+#else
+      const QString  cProgram = "addr2line";
 
       const QStringList  cArguments = {
+         "-C",
          "-f",
          "-p",
          "-s",
          "-e", inProgramName,
          cAddrStr
+
       };
 #endif
 
       sProcess->setProgram( cProgram );
       sProcess->setArguments( cArguments );
+      sProcess->setProcessChannelMode(QProcess::SeparateChannels);
+      sProcess->setReadChannel(QProcess::StandardOutput);
       sProcess->start( QIODevice::ReadOnly );
 
       if ( !sProcess->waitForFinished() )
@@ -182,23 +179,6 @@ namespace asmCrashReport
               )
       {
          QString  locationStr = _addressToLine( sProgramName, reinterpret_cast<void*>(stackFrame.AddrPC.Offset) );
-
-         // match the mangled name and demangle if we can
-         QRegularExpressionMatch match = sSymbolMatching.match( locationStr );
-
-         const QString  cSymbol( match.captured( 1 ) );
-
-         if ( !cSymbol.isNull() )
-         {
-            int   demangleStatus = 0;
-
-            const char  *cFunctionName = abi::__cxa_demangle( cSymbol.toLatin1().constData(), nullptr, nullptr, &demangleStatus);
-
-            if ( demangleStatus == 0 )
-            {
-               locationStr.replace( cSymbol, cFunctionName );
-            }
-         }
 
          frameList += QStringLiteral( "[%1] 0x%2 %3" )
                       .arg( QString::number( frameNumber ) )
@@ -283,7 +263,7 @@ namespace asmCrashReport
          frameInfoList += _stackTrace( inExceptionInfo->ContextRecord );
       }
 
-      _writeLog( cExceptionType, frameInfoList );
+      _showCrashReportDialog( cExceptionType, frameInfoList );
 
       return EXCEPTION_EXECUTE_HANDLER;
    }
@@ -303,13 +283,20 @@ namespace asmCrashReport
 
       frameList.reserve( traceSize );
 
-      for ( int i = 2; i < (traceSize - 1); ++i )
+#ifdef Q_OS_LINUX
+      int stackTraceStart = 3;
+#else
+      int stackTraceStart = 2;
+#endif
+
+      for ( int i = stackTraceStart; i < (traceSize - 1); ++i )
       {
          QString  message( messages[i] );
 
          // match the mangled name if possible and replace with file & line number
          QRegularExpressionMatch match = sSymbolMatching.match( message );
 
+#ifdef Q_OS_MAC
          const QString  cSymbol( match.captured( 1 ) );
 
          if ( !cSymbol.isNull() )
@@ -325,6 +312,38 @@ namespace asmCrashReport
          }
 
          frameList += message;
+#else
+
+         QString programName = match.captured( 1 );
+         QString programAddress = match.captured( 2 );
+
+         QString  locationStr;
+
+         if ( !programName.isNull() && !programAddress.isNull())
+         {
+             bool ok;
+             quintptr addressPtr = programAddress.toULongLong(&ok, 16);
+             locationStr = _addressToLine( programName, reinterpret_cast<void *>( addressPtr ) );
+         }
+         else
+         {
+             int index = message.lastIndexOf( " [0x" );
+             if ( index >= 0 )
+                 message = message.left( index) ;
+
+             locationStr = message;
+         }
+
+         int index = programName.lastIndexOf( "/" );
+         if (index >= 0)
+             programName = programName.right(programName.size() - index - 1);
+
+         frameList += QStringLiteral( "[%1] %4 0x%2 %3" )
+                      .arg( QString::number( frameNumber ) )
+                      .arg( quintptr( reinterpret_cast<void*>(sStackTraces[i]) ), 16, 16, QChar( '0' ) )
+                      .arg( locationStr )
+                      .arg( programName );
+#endif
 
          ++frameNumber;
       }
@@ -405,7 +424,7 @@ namespace asmCrashReport
 
       const QStringList cFrameInfoList = _stackTrace();
 
-      _writeLog( cSignalType, cFrameInfoList );
+      _showCrashReportDialog( cSignalType, cFrameInfoList );
 
       _Exit(1);
    }
@@ -413,7 +432,13 @@ namespace asmCrashReport
    void _posixSetupSignalHandler()
    {
       // setup alternate stack
-      stack_t ss{ static_cast<void*>(sAlternateStack), SIGSTKSZ, 0 };
+      // different operating systems define the struct in different order so the following is totally invalid:
+      // stack_t ss{ static_cast<void*>(sAlternateStack), SIGSTKSZ, 0 }; <-- might be valid on mac but a total mess in Linux!!!
+      // we have to assign each member separately
+      stack_t ss;
+      ss.ss_sp = static_cast<void*>(sAlternateStack);
+      ss.ss_size = SIGSTKSZ;
+      ss.ss_flags = 0;
 
       if ( sigaltstack( &ss, nullptr ) != 0 )
       {
@@ -427,12 +452,7 @@ namespace asmCrashReport
 
       sigemptyset( &sigAction.sa_mask );
 
-#ifdef __APPLE__
-      // backtrace() doesn't work on macOS when we use an alternate stack
       sigAction.sa_flags = SA_SIGINFO;
-#else
-      sigAction.sa_flags = SA_SIGINFO | SA_ONSTACK;
-#endif
 
       if ( sigaction( SIGSEGV, &sigAction, nullptr ) != 0 ) { err( 1, "sigaction" ); }
       if ( sigaction( SIGFPE,  &sigAction, nullptr ) != 0 ) { err( 1, "sigaction" ); }
@@ -443,21 +463,13 @@ namespace asmCrashReport
    }
 #endif
 
-   void  setSignalHandler( const QString &inCrashReportDirPath, logWrittenCallback inLogWrittenCallback )
+   void  setSignalHandler( crashReportCallback inCrashReportCallback )
    {
       sProgramName = QCoreApplication::arguments().at( 0 );
 
-      sCrashReportDirPath = inCrashReportDirPath;
-
-      if ( sCrashReportDirPath.isEmpty() )
-      {
-         sCrashReportDirPath = QStringLiteral( "%1/%2 Crash Logs" ).arg( QStandardPaths::writableLocation( QStandardPaths::DesktopLocation ),
-                                                                         QCoreApplication::applicationName() );
-      }
-
       sSymbolMatching.optimize();
 
-      sLogWrittenCallback = inLogWrittenCallback;
+      sCrashReportCallback = inCrashReportCallback;
 
       if ( sProcess == nullptr )
       {

@@ -1,29 +1,29 @@
-<!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-3-orange.svg?style=flat-square)](#contributors-)
-<!-- ALL-CONTRIBUTORS-BADGE:END -->
+# YappariCrashReport
+Based on [asmCrashReport](https://github.com/asmaloney/asmCrashReport) (excellent work by Andy Maloney).
 
-# asmCrashReport
-Provides a simple way to get stack trace information from crashes when using the [MinGW](http://www.mingw.org/) 32-bit or macOS clang compilers for [Qt](https://www.qt.io/)-based applications.
+Provides a dialog to show the user the stack trace information from crashes when using the [GNU GCC compiler](http://gcc.gnu.org/) including [MinGW](http://www.mingw.org/) for Windows or the clang compiler for [Qt](https://www.qt.io/)-based applications.
 
-This was made to fit my [purposes](https://asmaloney.com/2017/08/code/qt-crash-reporting-for-mingw-32-windows-and-clang-macos), but I think it is general enough to be useful to others.
+The user can optionally save the stack trace to a file clicking on the **Save report** button.
+
+Supports Windows, Linux and macOS.
 
 ## Usage
-There is a complete example included in this repo.
+There are two examples included in this repository.
 
-In your .pro file, you need to include the asmCrashreport.pri file. e.g.:
+In your .pro file, you need to include the YappariCrashReport.pri file. e.g.:
 
 ```
-if ( !include( ../asmCrashReport.pri ) ) {
-    error( Could not find the asmCrashReport.pri file. )
+if ( !include( ../YappariCrashReport.pri ) ) {
+    error( Could not find the YappariCrashReport.pri file. )
 }
 ```
-This will define **ASM_CRASH_REPORT** for the preprocessor and modify the C/CXX and linker flags to include the debug symbols properly.
+This will define **YAPPARI_CRASH_REPORT** for the preprocessor and modify the C/CXX and linker flags to include the debug symbols properly.
 
 In your main.cpp, include the header:
 
 ```cpp
-#ifdef ASM_CRASH_REPORT
-#include "asmCrashReport.h"
+#ifdef YAPPARI_CRASH_REPORT
+#include "YappariCrashReport.h"
 #endif
 ```
 
@@ -31,119 +31,63 @@ In your *main()* function, set your signal handler *after* you have declared you
 ```cpp
 QApplication  app( argc, argv );
 
-app.setApplicationName( QStringLiteral( "asmCrashReportExample" ) );
+app.setApplicationName( QStringLiteral( "YappariCrashReportExample" ) );
 app.setApplicationVersion( QStringLiteral( "1.0.0" ) );
 
-#ifdef ASM_CRASH_REPORT
-  asmCrashReport::setSignalHandler( QString(), [] (const QString &inFileName, bool inSuccess) {
-     // do something with results - I show a QMessageBox (see example)
-  });
+#ifdef YAPPARI_CRASH_REPORT
+   YappariCrashReport::setSignalHandler( [] (const QString &inStackTrace) {
+
+       const QStringList strList = QStringList(inStackTrace.split("\n"));
+       for (const QString &str : strList)
+           qCritical() << str;
+   });
 #endif
 ```
 
-**asmCrashReport::setSignalHandler** has the following prototype:
+*YappariCrashReport::setSignalHandler* has the following prototype:
 ```cpp
-// inCrashReportDirPath is the path to directory to write our crash report to. If this is not set, it will use Desktop/<App Name> Crash Logs/
-// inLogWrittenCallback is a callback that will be called after the log file is written
-void  setSignalHandler( const QString &inCrashReportDirPath = QString(), logWrittenCallback inLogWrittenCallback = nullptr );
+   /// inCrashReportCallback: A callback function to call after we've shown the dialog to the user
+   void setSignalHandler( crashReportCallback inCrashReportCallback = nullptr );
 ```
 
-The callback can be used to show a message to the user about where to find the log file. It's signature must be this:
+The callback can be used to send the stack trace to the stderr. Its signature must be this:
 
 ```cpp
-// inLogFileName is the full path to the log file which was written
-// inSuccess returns whether the file was successfully written or not
-typedef void (*logWrittenCallback)( const QString &inLogFileName, bool inSuccess );
+   /// inCrashReport: The report including the stack trace as a QString
+   void crashReportCallback( const QString &inCrashReport );
 ```
+Look at the example and test source code for more information on how to do this.
 
-## Windows
+## Windows (MingW)
 Windows needs to be able to find the **addr2line** command line tool.
 
-Currently, asmCrashReporter will look for this in a tools directory next to the executable (see *asmCrashReport.cpp*'s **_addr2line()** function).
+Currently, YappariCrashReporter will look for this in a tools directory next to the executable (see *YappariCrashReport.cpp*'s **_addr2line()** function).
 
-### cygwin
-I use **addr2line** from [Cygwin](https://www.cygwin.com/).
+The prebuilt MinGW Qt installers include **addr2line** in the *bin* directory. It's statically linked so you only need to copy this file to the *tools* directory.
 
-When sending your build to a user, you will need to include some DLLs alongside the exe to make it work.
+You can find it usually at C:\Qt\Tools\mingw*xxx_xx*\bin.
 
-The *tools* directory (or whatever you change it to) should contain:
+### Linux
+You need to have the *binutils* package installed that includes **addr2line**.
 
-```
--rwxrwx---+ 1 Administrators None  934931 Nov 21  2015 addr2line.exe
--rwxrwx---+ 1 Administrators None 1033235 Feb 20  2015 cygiconv-2.dll
--rwxrwx---+ 1 Administrators None   42515 Oct 23  2016 cygintl-8.dll
--rwxrwx---+ 1 Administrators None 3319090 Jul 12 05:00 cygwin1.dll
--rwxrwx---+ 1 Administrators None   85011 Mar  3 16:45 cygz.dll
-```
+## Examples
 
-These DLLs may be found in your Cygwin install's *bin* directory.
+In **Windows** the dialog look like this:
 
-### MinGW
-The prebuilt MinGW Qt installers include **addr2line** in the *bin* directory. It may require other DLLs in order to work on the target machine. (As mentioned above, I use cygwin, so I'm not sure what is required here.)
+![Yappari Crash Report Test on Windows](images/YappariCrashReportTest.png)
 
-## Example Logs
-macOS (clang):
-```
-asmCrashReportExample v1.0.0
-07 Aug 2017 @ 09:42:38
+For **Linux** it would look like this:
 
-Caught SIGFPE: (integer divide by zero)
+![Yappari Crash Report Test on Linux](images/YappariCrashReportTestLinux.png)
 
-2   libsystem_platform.dylib            0x00007fffacc42b3a _sigtramp + 26
-3   ???                                 0x0000000000000000 0x0 + 0
-4   asmCrashReportExample               0x0000000100008bd4 crashTest::function2(int) (in asmCrashReportExample) (main.cpp:26)
-5   asmCrashReportExample               0x0000000100008baa crashTest::function1() (in asmCrashReportExample) (main.cpp:31)
-6   asmCrashReportExample               0x00000001000085d5 crashTest::crashMe() (in asmCrashReportExample) (main.cpp:13)
-7   asmCrashReportExample               0x00000001000083de main + 206
-8   libdyld.dylib                       0x00007fffaca33235 start + 1
-```
-Windows (MinGW32):
-```
-asmCrashReportExample v1.0.0
-07 Aug 2017 @ 13:48:22
+If you run the included test you get to select which type of crash you want to test:
 
-EXCEPTION_INT_DIVIDE_BY_ZERO
+![Choosing a crash](images/ChooseCrash.png)
 
-[0] 0x00000000004056ea crashTest::divideByZero(int) at C:\dev\asmCrashReport\build-example-Qt_5_9_1_MinGW_32bit/../example/main.cpp:18
-[1] 0x0000000000405749 crashTest::function2(int) at C:\dev\asmCrashReport\build-example-Qt_5_9_1_MinGW_32bit/../example/main.cpp:25
-[2] 0x0000000000405726 crashTest::function1() at C:\dev\asmCrashReport\build-example-Qt_5_9_1_MinGW_32bit/../example/main.cpp:30
-[3] 0x0000000000405707 crashTest::crashMe() at C:\dev\asmCrashReport\build-example-Qt_5_9_1_MinGW_32bit/../example/main.cpp:13
-[4] 0x0000000000403388 qMain(int, char**) at C:\dev\asmCrashReport\build-example-Qt_5_9_1_MinGW_32bit/../example/main.cpp:61
-[5] 0x0000000000404592 ?? at qtmain_win.cpp:?
-```
+## Main differences with [asmCrashReport](https://github.com/asmaloney/asmCrashReport)
 
-## Pull Requests
-Issues and pull requests welcome!
+[asmCrashReport](https://github.com/asmaloney/asmCrashReport) saves the stack trace to a log file in subfolder of the Desktop (Windows) or the user's home directory (Linux/macOS).
 
-## Notes
+YappariCrashReport shows a nice dialog to the user and give them the option to save the file or not, in a location of their preference.
 
-If anyone knows why the macOS version doesn't get the first frame correct in the example I'd love to hear from you!
-
-This code might work on Linux too since the code path for macOS should be POSIX compliant, though I haven't tried it. It could also be extended to handle MSVC compiles (or maybe it already does!), but I don't use that compiler so I can't test it.
-
-## More Information
-See the post [Crash Reporting For MinGW 32 (Windows) and Clang (macOS) With Qt](https://asmaloney.com/2017/08/code/crash-reporting-for-mingw-32-windows-and-clang-macos-with-qt/) for details.
-
-07 August 2017
-Andy Maloney
-https://asmaloney.com
-
-## Contributors
-Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
-
-<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-<table>
-  <tr>
-    <td align="center"><a href="https://asmaloney.com"><img src="https://avatars0.githubusercontent.com/u/391371?v=4" width="100px;" alt=""/><br /><sub><b>Andy Maloney</b></sub></a><br /><a href="https://github.com/asmaloney/asmCrashReport/commits?author=asmaloney" title="Code">💻</a> <a href="https://github.com/asmaloney/asmCrashReport/commits?author=asmaloney" title="Documentation">📖</a> <a href="#example-asmaloney" title="Examples">💡</a> <a href="#maintenance-asmaloney" title="Maintenance">🚧</a> <a href="#projectManagement-asmaloney" title="Project Management">📆</a></td>
-    <td align="center"><a href="http://huseyinkozan.com.tr/"><img src="https://avatars1.githubusercontent.com/u/807234?v=4" width="100px;" alt=""/><br /><sub><b>Hüseyin Kozan</b></sub></a><br /><a href="https://github.com/asmaloney/asmCrashReport/commits?author=huseyinkozan" title="Code">💻</a> <a href="https://github.com/asmaloney/asmCrashReport/commits?author=huseyinkozan" title="Tests">⚠️</a></td>
-    <td align="center"><a href="https://github.com/PSlava"><img src="https://avatars3.githubusercontent.com/u/13217353?v=4" width="100px;" alt=""/><br /><sub><b>PSlava</b></sub></a><br /><a href="https://github.com/asmaloney/asmCrashReport/commits?author=PSlava" title="Code">💻</a></td>
-  </tr>
-</table>
-
-<!-- markdownlint-enable -->
-<!-- prettier-ignore-end -->
-<!-- ALL-CONTRIBUTORS-LIST:END -->
-
-This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!
+Also [asmCrashReport](https://github.com/asmaloney/asmCrashReport) doesn't work on Linux without some modifications that are included in this project.
